@@ -1,0 +1,800 @@
+---
+title: "OROV Figures"
+output: html_document
+date: "2025-12-19"
+---
+**Figures for the manuscript titled, "Ecological, evolutionary, and social drivers of Oropuche virus expansion within and beyond the Amazon"** 
+
+
+Figure questions can be directed to Samantha Sambado (ssambado at stanford.edu)
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## upload necessary packages
+library(cowplot)
+library(ggpubr)
+library(ggplot2)
+library(ggspatial)
+library(janitor)
+library(paletteer)
+library(patchwork)
+library(rgbif)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(scales)
+library(sf)
+library(terra) 
+library(tidyterra)
+library(tidyverse)
+library(colorspace)
+
+```
+
+#Spatial Boundaries
+```{r}
+### baseline map for figures
+# whole world
+world <- ne_countries(scale = "large", returnclass = "sf")
+
+## central/south america
+cs_america <- world %>% 
+  filter(geounit %in% c("Belize", "Costa Rica", "El Salvador", "Guatemala", 
+                        "Honduras", "Nicaragua", "Panama", "Argentina", "Bolivia", 
+                        "Brazil", "Chile", "Colombia", "Ecuador", "Guyana",
+                        "Paraguay", "Peru", "Suriname", "Uruguay", "Venezuela", "French Guiana",
+                        "Barbados", "Cuba", "Dominica", "Haiti", "Trinidad and Tobago"))
+
+# make vect for mask/crop
+cs_america_vect <- vect(cs_america)
+
+
+### administrative boundaries
+admin <- c("Belize", "Costa Rica", "El Salvador", "Guatemala", "Honduras", "Nicaragua", "Panama",
+           "Argentina", "Bolivia", "Brazil", "Chile", "Colombia", "Ecuador", "Guyana",
+           "Paraguay", "Peru", "Suriname", "Uruguay", "Venezuela", "French Guiana",
+           "Barbados", "Cuba", "Dominica", "Haiti", "Trinidad and Tobago")
+
+admin_countries <- ne_states(country = admin, returnclass = "sf")
+
+```
+
+
+
+#Figure 2 - Human OROV
+
+###a. cases per week (all countries)
+```{r}
+# manually scraped data from PAHO OROV portal
+# https://www.paho.org/en/arbo-portal/arbo-portal-oropouche
+orov_cases <- read.csv("data/raw/OROV_PAHO_samentered.csv") %>% 
+  mutate(country = str_to_title(country), # fix country labeling for merging
+    country = case_when(country == "Brasil" ~ "Brazil",
+                        TRUE ~ country)
+
+```
+
+plot it
+```{r}
+barplot_cases2 <- orov_cases %>% 
+  ggplot(aes(x = week, y = case, fill = country)) +
+  geom_bar(width = 0.85, color = "grey20", linewidth = 0.2,stat = "identity") +
+  theme_classic(base_size = 13) +
+  labs(x = "Epidemiological Week", y = "Human OROV Cases", fill = "") +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  scale_fill_manual(values = c("#173870FF", "#2D5A96FF", "#4B78A5FF", "#6987B4FF", "#B4C3C3FF", "#D2D2D2FF", "#E1E1D2FF", "#96B478FF", "#78965AFF", "#5A784BFF", "#4B692DFF", "#3C783CFF", "#5A781EFF", "#B4C369FF")) +
+  theme(legend.title = element_text(face = "bold"),
+        legend.text = element_text(size = 13),
+        axis.title = element_text(size = 18, face = "bold"),
+        axis.text = element_text(size = 15),
+        legend.position  ="bottom",
+        legend.box.spacing = unit(0,"pt"),
+        plot.margin = margin(0, 0, 0, 0),
+        panel.spacing = unit(.1, "lines"),
+        strip.background = element_rect(fill = "grey90", color = NA),
+        strip.text = element_text(face = "bold", size = 20)) +
+  facet_wrap(~year) + 
+  guides(fill = guide_legend(nrow = 1, byrow = TRUE))
+
+
+ggsave(barplot_cases2, file = "figures/barplotcases_v4.png", width = 12, height = 5.5, units = "in", dpi = 300)
+
+```
+
+
+###b. total cases for brazil admin
+```{r}
+
+brazil_cases <- read.csv("data/raw/OROV_Braziladmin_samentered.csv") %>% 
+  rename(code_hasc_slim = code_hasc) %>% 
+  group_by(code_hasc_slim) %>% 
+  summarise(cases_sum = sum(cases,na.rm = TRUE))
+
+brazil_inc <- cs_america_inc %>% 
+  filter(admin == "Brazil")
+
+
+admin_brazil <- admin_countries %>% 
+  filter(admin == "Brazil") %>% 
+  mutate(code_hasc_slim = substr(code_hasc,4,5))
+
+
+## make map labels
+brazil_centroids <- admin_brazil %>%#brazil_inc
+  st_point_on_surface() %>%
+  mutate(lon = st_coordinates(.)[,1],
+         lat = st_coordinates(.)[,2],
+         label = code_hasc_slim) #iso_a2) 
+
+
+admin_brazil_inc <- admin_brazil %>% 
+  left_join(brazil_cases, by = "code_hasc_slim") %>% 
+  mutate(cases_sum = ifelse(is.na(cases_sum), 0, cases_sum)) 
+
+```
+
+plot it
+```{r}
+max_blue <- "#2D5A96FF"
+blue_palette <- c(
+  lighten(max_blue, 0.99),  # 60% lighter
+  lighten(max_blue, 0.5),
+  lighten(max_blue, 0.1),
+  max_blue)
+
+map_brasilcases <- ggplot() +
+  geom_sf(data = admin_brazil_inc, aes(fill = log(cases_sum+1)), color = alpha("grey40", 0.8), size = 0.35) +
+  coord_sf(expand = FALSE) + 
+  scale_fill_gradientn(colors = blue_palette, na.value = "white",name = "log(Total OROV Cases)") +
+  geom_sf(data = admin_brazil, fill = NA, color = alpha("grey10", 0.25)) +
+  theme_void(base_size = 13) +
+  theme(legend.title = element_text(face = "bold"),
+        plot.margin = margin(2, 2, 2, 2), # changed from all 0s
+        legend.position = "bottom",
+        legend.key.height = unit(0.35, "cm"),
+        legend.key.width = unit(1.2, "cm")) +
+  guides(fill = guide_colorbar(title.position = "top")) +
+  annotation_scale(width_hint = 0.3, location = "br") + 
+  annotation_north_arrow(which_north = "true",
+                         location = "br", pad_y = unit(1, "cm"),
+                       style = north_arrow_fancy_orienteering) +
+  annotate("text", x = -43, y = 1.5, label = "Brazil", size = 4, fontface = "bold")
+
+ggsave(map_brasilcases, file = "figures/map_brasilcases_v6.png", width = 6, height = 3.5, units = "in", dpi = 300)
+
+
+```
+
+
+###c. average incidence for all countries
+```{r}
+## data
+# manually scraped data from PAHO OROV portal
+# https://www.paho.org/en/arbo-portal/arbo-portal-oropouche
+orov_cases <- read.csv("data/raw/OROV_PAHO_samentered.csv") %>% 
+  mutate(country = str_to_title(country), # fix country labeling for merging
+    country = case_when(country == "Brasil" ~ "Brazil",
+                        TRUE ~ country))
+
+## calculate average incidence from PAHO OROV portal
+cs_america_inc <- cs_america %>% 
+  left_join(orov_cases, by = c("admin" = "country")) %>% 
+  # laboratory confirmed incidence (2024/2025 or just single reported year)
+  mutate(incidence = case_when(admin == "Barbados" ~ (0.66),
+                               admin == "Bolivia" ~ (3.01),
+                               admin == "Brazil" ~ (6.47+5.60)/2,
+                               admin == "Colombia" ~ (0.16+0.05)/2,
+                               admin == "Cuba" ~ (5.53+0.31)/2,
+                               admin == "Ecuador" ~ (0.02),
+                               admin == "Guyana" ~ (0.38+0.13)/2,
+                               admin == "Panama" ~ (0.36+14.74)/2,
+                               admin == "Peru" ~ (3.97+0.99)/2,
+                               admin == "Venezuela" ~ (0.02),
+                               admin == "Chile" ~ 0,
+                               admin == "Uruguay" ~ 0,
+                               TRUE ~ NA)) %>%
+  mutate(incidence = ifelse(is.na(incidence), 0, incidence)) 
+
+## make map labels
+cs_centroids <- cs_america_inc %>%
+  st_point_on_surface() %>%
+  mutate(lon = st_coordinates(.)[,1],
+         lat = st_coordinates(.)[,2],
+         label = iso_a2) %>% 
+  # get rid of labels that take up too much space compared to country
+  filter(iso_a2 != "BZ" &
+           iso_a2 != "GT" &
+           iso_a2 != "HN" &
+           iso_a2 != "NI" &
+           iso_a2 != "CR" &
+           iso_a2 != "SV" &
+           iso_a2 != "DM" &
+           iso_a2 != "HT" &
+           iso_a2 != "TT" &
+           iso_a2 != "PA" &
+           iso_a2 != "BB" &
+           iso_a2 != "CU" &
+           iso_a2 != "SR" &
+           iso_a2 != "GY" &
+           iso_a2 != "EC")
+```
+
+plot it
+```{r}
+map_incidence2 <- ggplot() +
+  geom_sf(data = cs_america_inc, aes(fill = incidence), color = alpha("grey40", 0.8), size = 0.35) +
+  coord_sf(expand = FALSE) + 
+  scale_fill_paletteer_c("grDevices::OrRd", direction = -1,
+                         na.value = "white",name = "Average OROV Incidence") +
+   geom_sf(data = admin_countries, fill = NA, color = alpha("grey10", 0.25)) +
+  geom_sf_label(data = cs_centroids, aes(label = label), 
+                size = 3, fill = "white",color = "black",fontface = "bold", label.size = .1) +
+  theme_void(base_size = 13) +
+  theme(legend.title = element_text(face = "bold"),
+        plot.margin = margin(2, 2, 2, 2), # changed from all 0s
+        legend.position = "bottom",
+        legend.key.height = unit(0.35, "cm"),
+        legend.key.width = unit(1.2, "cm")) +
+  guides(fill = guide_colorbar(title.position = "top")) +
+  annotation_scale(width_hint = 0.3, location = "br") + 
+  annotation_north_arrow(which_north = "true",
+                         location = "br", pad_y = unit(1, "cm"),
+                       style = north_arrow_fancy_orienteering) +
+    annotate("text", x = -43, y = 11.5, label = "Latin\nAmerica", size = 4, fontface = "bold")
+
+ggsave(map_incidence2, file = "figures/map_incidence_v6.png", width = 3, height = 3.5, units = "in", dpi = 300)
+
+```
+
+
+#Figure 3 - Environmental & Social Drivers of EIDs
+
+
+###Part A - temperature
+
+wrangle data
+```{r}
+### step 1. upload CHELSA data
+# set params
+years  <- 2015:2020  # change if needed
+months <- sprintf("%02d", 1:12) # change if needed
+
+# call CHELSA website
+base <- "https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/monthly/tas"
+
+urls <- c()
+
+for (y in years) {
+  for (m in months) {
+    urls <- c(urls, sprintf("%s/%d/CHELSA_tas_%s_%d_V.2.1.tif", base, y, m, y))}
+}
+
+# may need to optimize for computer
+options(timeout = 1000)
+for (url in urls) {
+  outfile <- file.path("CHELSA_tas", basename(url))
+  download.file(url, outfile, mode = "wb", method = "curl")
+}
+
+### step 2. crop CHELSA to south america
+# need to figure out better optimization for my computer
+terraOptions(memfrac = 0.6, tempdir = "temp/")
+
+# call files in 
+chelsa_files <- list.files("data/raw/CHELSA_tas", pattern = "\\.tif$", full.names = TRUE)
+chelsa_r <- rast(chelsa_files)
+cs_america_vect2 <- project(cs_america_vect, crs(chelsa_r))
+
+# set up some basics
+extent_sa <- ext(-95, -30, -60, 25)
+in_dir  <- "data/raw/CHELSA_tas"
+out_dir <- "data/processed/CHELSA_tas_SA"
+
+
+# set up forloop to crop 
+dir_files <- list.files(in_dir, pattern = "\\.tif$", full.names = TRUE)
+
+for (f in dir_files) {
+  message("Processing: ", basename(f))
+  
+  r <- rast(f)
+
+  out_file <- file.path(out_dir, basename(f))
+
+  # crop + mask & write directly to disk
+  r_mask <- mask(crop(r, extent_sa),
+                 cs_america_vect2,
+                 filename = out_file,
+                 overwrite = TRUE)
+
+  gc()  #clear memory between iterations
+}
+
+### step 3. calculate average temperature during rainy season
+in_dir2 <- "data/processed/CHELSA_tas_SA/"
+crop_files <- list.files(in_dir2, pattern = "\\.tif$", full.names = TRUE)
+
+# set params of years & months 
+years <- 2015:2020
+rain_months <- c("12", "01", "02", "03", "04", "05", "06", "07") 
+
+# build pattern to pull specific params
+year_pattern <- paste(years, collapse = "|")
+month_pattern <- paste(rain_months, collapse = "|")
+pattern <- paste0("_(", month_pattern, ")_(", year_pattern, ")_V\\.2\\.1\\.tif$")
+
+rain_files <- crop_files[grepl(pattern, crop_files)]
+
+# read stack & compute mean
+rain_stack <- rast(rain_files)
+mean_temp_K <- mean(rain_stack, na.rm = TRUE)
+mean_temp_C <- mean_temp_K - 273.15 # convert to C
+#plot(mean_temp_C)
+
+out_file <- "data/processed/chelsa_meantemp_rainyseason_20152020.tif"
+#writeRaster(mean_temp_C, out_file, overwrite = TRUE)
+```
+
+plot it!
+```{r}
+
+## set up data
+mean_temp_C <- rast("data/processed/chelsa_meantemp_rainyseason_20152020.tif")
+temp_df <- as.data.frame(mean_temp_C, xy = TRUE)
+colnames(temp_df) <- c("lon", "lat", "temp")
+
+## make plot
+map_temp_rainyszn <- ggplot() +
+  geom_raster(data = temp_df, aes(x = lon, y = lat, fill = temp)) +
+  geom_sf(data = cs_america, fill = NA, color = alpha("grey40", 0.8), size = 0.35) +
+  coord_sf(xlim = c(-95, -30), ylim = c(-60, 25), expand = FALSE) +
+  theme_void(base_size = 13) +
+  labs(fill = "°C", title = "Mean Temperature") +
+  theme(legend.title = element_text(face = "bold"),
+        plot.margin = margin(0, 0, 0, 0)) +
+  scale_fill_paletteer_c("grDevices::RdYlBu", direction = -1) 
+
+ggsave(map_temp_rainyszn, file = "figures/map_temp_rainyszn_v3.png", width = 6.5, height = 5.5, units = "in", dpi = 300)
+
+```
+
+
+###Part B - forest cover
+
+wrangle data
+```{r}
+## my computer hated this, need to optimize
+# forest cover files
+cover_files <- list.files("data/raw/hansen_forest_cover/", pattern = "cover_.*\\.tif$", full.names = TRUE)
+
+# make virtual raster
+forest_cover <- vrt(cover_files)
+
+# reclassify forest as 30%
+rcl_mat <- matrix(c(-Inf, 30, 0,
+                    30, Inf, 1), ncol = 3, byrow = TRUE)
+
+# Classify & write directly to disk (this somewhat helped)
+forest_cover_bin <- writeRaster(
+  classify(forest_cover, rcl = rcl_mat),
+  filename = "data/processed/forest_cover_bin.tif",
+  overwrite = TRUE,
+  datatype = "INT1U",  # 1-byte unsigned integer is enough for 0/1
+  wopt = list(datatype = "INT1U", gdal = "COMPRESS=LZW"))
+  
+#plot(rast("data/processed/forest_cover_bin.tif"))
+
+
+```
+
+plot it!
+```{r}
+## set up data
+forest_cover_bindata <- rast("data/processed/forest_cover_bin.tif")
+
+## plot it
+map_forest_hansen <- ggplot() +
+  # kept to spatraster to not explode my computer as geom_sf
+  geom_spatraster(data = forest_cover_bindata) +
+  scale_fill_gradient(low = "transparent", high = "#5EA176FF") + 
+  theme_void() +
+  geom_sf(data = cs_america, fill = NA, color = alpha("grey40", 0.8), size = 0.35) +
+  coord_sf(xlim = c(-95, -30), ylim = c(-60, 25), expand = FALSE) +
+  theme_void(base_size = 13) +
+  labs(title = "Forest Cover") +
+  theme(legend.title = element_text(face = "bold"),
+        legend.position = "bottom",
+        legend.key.width = unit(2, "cm"),
+        legend.key.height = unit(0.4, "cm"),
+        legend.margin = margin(0, 0, 0, 0),
+        legend.box.margin = margin(0, 0, 0, 0),
+        plot.margin = margin(0, 0, 0, 0)) +
+  guides(fill = FALSE) +
+  annotation_scale(width_hint = 0.3, location = "br") + 
+  annotation_north_arrow(which_north = "true",
+                         location = "br", pad_y = unit(1, "cm"),
+                       style = north_arrow_fancy_orienteering)
+
+ggsave(map_forest_hansen, file = "figures/map_forest_hansen_v3.png", width = 6.5, height = 5.5, units = "in", dpi = 300)
+```
+
+###Part C - population density
+
+wrangle data
+```{r}
+pop <- terra::rast("data/raw/gpw-v4-population-density-rev11_2015_30_sec_tif/gpw_v4_population_density_rev11_2015_30_sec.tif")
+
+# buffer polygon to avoid holes
+poly_buf <- buffer(cs_america_vect, width = 0.05)
+
+# crop and mask
+pop_crop <- crop(pop, poly_buf)
+pop_mask <- mask(pop_crop, poly_buf, touches = TRUE)
+
+# convert to df
+pop_df <- as.data.frame(pop_mask, xy = TRUE)
+colnames(pop_df) <- c("lon", "lat", "pop_density")
+
+# avoid log10 issues 
+pop_df$pop_density_adj <- pop_df$pop_density + 0.001
+
+```
+
+plot it!
+```{r}
+map_pop <- 
+  ggplot() +
+  geom_raster(data = pop_df, aes(x = lon, y = lat, fill = pop_density_adj)) +
+  geom_sf(data = cs_america, fill = NA, color = alpha("grey40", 0.8), size = 0.35) +
+  coord_sf(xlim = c(-95, -30), ylim = c(-60, 25), expand = FALSE) +
+  theme_void(base_size = 13) +
+  labs(fill = "people/km²", title = "Population Density") + 
+  theme(legend.title = element_text(face = "bold"),
+        plot.margin = margin(0, 0, 0, 0)) +
+  scale_fill_paletteer_c("grDevices::YlGnBu",#"ggthemes::Blue-Green Sequential"
+                         trans = "log10", direction = -1, #-1
+                         breaks = c(0.001, 0.1, 1, 10, 100, 1000, 10000),
+                         labels = c(c("0", "0.1", "1", "10", "100", "1k", "10k")))
+
+ggsave(map_pop, file = "figures/map_pop_v6.png", width = 6.5, height = 5.5, units = "in", dpi = 300)
+```
+
+
+###Part D - healthcare access
+
+wrangle data
+```{r}
+travel <- rast("data/raw/2020_walking_only_travel_time_to_healthcare.geotiff")
+travel_crop <- crop(travel, ext(cs_america_vect))
+travel_sa <- mask(travel_crop, cs_america_vect)
+
+```
+
+plot it!
+```{r}
+## set up data
+travel_df <- as.data.frame(travel_sa, xy = TRUE, na.rm = TRUE)
+colnames(travel_df) <- c("lon", "lat", "traveltime")
+
+# convert minutes to hours
+travel_df$traveltime_hr <- travel_df$traveltime / 60
+
+map_travel <- 
+ggplot() +
+  geom_raster(data = travel_df, aes(x = lon, y = lat, fill = traveltime_hr)) +
+  geom_sf(data = cs_america, fill = NA, color = alpha("grey40", 0.8), size = 0.35) +
+  coord_sf(xlim = c(-95, -30), ylim = c(-60, 25), expand = FALSE) +
+  theme_void(base_size = 13) +
+  labs(fill = "hours", title = "Access to Healthcare") +
+  theme(legend.title = element_text(face = "bold"),
+        plot.margin = margin(0, 0, 0, 0)) +
+  scale_fill_paletteer_c("grDevices::RdYlBu", direction = -1, trans = "log1p",
+                         breaks = c(1, 2, 4, 8, 24, 48), 
+                         labels = c("1", "2", "4", "8", "24", "48")) +
+  guides(fill = guide_colorbar(barheight = 10.0))
+
+
+
+ggsave(map_travel, file = "figures/map_travel_v2.png", width = 6.5, height = 5.5, units = "in", dpi = 300)
+```
+
+
+#Figure 4 - Hypothesized Ecological Components
+
+###Part A - crop types
+wrangle data
+```{r}
+#### BANANA
+banana_rast <- terra::rast("data/raw/CROPGRIDSv1.08_NC_maps/CROPGRIDSv1.08_banana.nc")
+banana <- banana_rast[["harvarea"]]
+banana_crop <- crop(banana, cs_america_vect)
+banana_mask <- mask(banana_crop, cs_america_vect)
+banana_df <- as.data.frame(banana_mask, xy = TRUE)
+colnames(banana_df) <- c("lon", "lat", "harvest")
+# Replace zeros outside valid raster area with NA
+banana_df$harvest[banana_df$harvest == 0] <- NA
+
+
+### COCOA
+cocoa_rast <- terra::rast("data/raw/CROPGRIDSv1.08_NC_maps/CROPGRIDSv1.08_cocoa.nc")
+cocoa <- cocoa_rast[["harvarea"]]
+cocoa_crop <- crop(cocoa, cs_america_vect)
+cocoa_mask <- mask(cocoa_crop, cs_america_vect)
+cocoa_df <- as.data.frame(cocoa_mask, xy = TRUE)
+colnames(cocoa_df) <- c("lon", "lat", "harvest")
+cocoa_df$harvest[cocoa_df$harvest == 0] <- NA
+
+## SOYBEAN
+soybean_rast <- terra::rast("data/raw/CROPGRIDSv1.08_NC_maps/CROPGRIDSv1.08_soybean.nc")
+soybean <- soybean_rast[["harvarea"]]
+soybean_crop <- crop(soybean, cs_america_vect)
+soybean_mask <- mask(soybean_crop, cs_america_vect)
+soybean_df <- as.data.frame(soybean_mask, xy = TRUE)
+colnames(soybean_df) <- c("lon", "lat", "harvest")
+soybean_df$harvest[soybean_df$harvest == 0] <- NA
+
+
+```
+
+plot it!
+```{r}
+# banana
+map_banana <- ggplot() +
+  geom_raster(data = banana_df, aes(x = lon, y = lat, fill = harvest)) +
+  geom_sf(data = cs_america, fill = NA, color = alpha("grey40", 0.8), size = 0.35) +
+  coord_sf(xlim = c(-95, -30), ylim = c(-60, 25), expand = FALSE) +
+  theme_void(base_size = 13) +
+  labs(fill = "ha", title = "Banana") +
+  theme(#legend.title = element_text(face = "bold"),
+        plot.margin = margin(0, 0, 0, 0),
+        legend.position = "right",
+        legend.title = element_text(face = "bold", size = 10),
+        legend.text = element_text(size = 9),
+        legend.key.height = unit(0.45, "cm"),
+        legend.key.width  = unit(0.6, "cm"),
+        legend.margin = margin(2, 2, 2, 2),
+        legend.box.margin = margin(2, 2, 2, 2),
+        legend.spacing = unit(0.3, "cm")) +
+  guides(fill = guide_colorbar(barheight = unit(4, "cm"),
+                               barwidth  = unit(0.5, "cm"),
+                               ticks.colour = "black",
+                               frame.colour = "black")) +
+  scale_fill_paletteer_c("grDevices::YlGnBu",trans = "log1p", #"viridis::magma",
+                         breaks = c(0, 1, 10, 100, 1000),
+                         direction = -1, na.value = "grey90") 
+
+# cocoa
+map_cocoa<- ggplot() +
+  geom_raster(data = cocoa_df, aes(x = lon, y = lat, fill = harvest)) +
+  geom_sf(data = cs_america, fill = NA, color = alpha("grey40", 0.8), size = 0.35) +
+  coord_sf(xlim = c(-95, -30), ylim = c(-60, 25), expand = FALSE) +
+  theme_void(base_size = 13) +
+  labs(fill = "ha", title = "Cocoa") +
+  theme(#legend.title = element_text(face = "bold"),
+        plot.margin = margin(0, 0, 0, 0),
+        legend.position = "right",
+        legend.title = element_text(face = "bold", size = 10),
+        legend.text = element_text(size = 9),
+        legend.key.height = unit(0.45, "cm"),
+        legend.key.width  = unit(0.6, "cm"),
+        legend.margin = margin(2, 2, 2, 2),
+        legend.box.margin = margin(2, 2, 2, 2),
+        legend.spacing = unit(0.3, "cm")) +
+  guides(fill = guide_colorbar(barheight = unit(4, "cm"),
+                               barwidth  = unit(0.5, "cm"),
+                               ticks.colour = "black",
+                               frame.colour = "black")) +
+  scale_fill_paletteer_c("grDevices::YlGnBu",trans = "log1p", #"viridis::magma",
+                         breaks = c(0, 1, 10, 100, 1000),
+                         direction = -1, na.value = "grey90") 
+
+# soybean
+map_soybean <- ggplot() +
+  geom_raster(data = soybean_df, aes(x = lon, y = lat, fill = harvest)) +
+  geom_sf(data = cs_america, fill = NA, color = alpha("grey40", 0.8), size = 0.35) +
+  coord_sf(xlim = c(-95, -30), ylim = c(-60, 25), expand = FALSE) +
+  theme_void(base_size = 13) +
+  labs(fill = "ha", title = "Soybean") +
+  theme(#legend.title = element_text(face = "bold"),
+        plot.margin = margin(0, 0, 0, 0),
+        legend.position = "right",
+        legend.title = element_text(face = "bold", size = 10),
+        legend.text = element_text(size = 9),
+        legend.key.height = unit(0.45, "cm"),
+        legend.key.width  = unit(0.6, "cm"),
+        legend.margin = margin(2, 2, 2, 2),
+        legend.box.margin = margin(2, 2, 2, 2),
+        legend.spacing = unit(0.3, "cm")) +
+  guides(fill = guide_colorbar(barheight = unit(4, "cm"),
+                               barwidth  = unit(0.5, "cm"),
+                               ticks.colour = "black",
+                               frame.colour = "black")) +
+  scale_fill_viridis_c()
+  scale_fill_paletteer_c("grDevices::YlGnBu",trans = "log1p", #"viridis::magma",
+                         breaks = c(0, 1, 10, 100, 1000),
+                         direction = -1, na.value = "grey90") 
+
+
+### combine them
+# make common legend
+common_scale <- scale_fill_paletteer_c("grDevices::YlGnBu", trans = "log1p", direction = -1, #"viridis::magma",
+                                       breaks = c(0, 1, 10, 100, 1000),
+                                       labels = c("0","1","10","100","1000"),
+                                       na.value = "#E5E5E5FF", name = "ha")
+
+# make slight adjustments
+map_banana2 <- map_banana + common_scale + theme(legend.position = "none")
+map_cocoa2  <- map_cocoa  + common_scale + theme(legend.position = "none")
+map_soybean2 <- map_soybean + common_scale + theme(legend.position = "none")
+
+# combine
+maps_crop_combo <- (map_banana2 | map_cocoa2 | map_soybean2) + 
+  plot_layout(guides = "collect") +
+  theme(legend.position = "right",               
+        legend.title = element_text(face = "bold", size = 10),
+        legend.text  = element_text(size = 9),
+        legend.key.height = unit(1.5, "cm"),    
+        legend.key.width  = unit(0.4, "cm"),    
+        legend.margin = margin(2,2,2,2),
+        legend.box.margin = margin(2,2,2,2))
+
+
+ggsave(maps_crop_combo, file = "figures/maps_crop_combo_v2.png", width = 12, height = 5.5, units = "in", dpi = 300)
+```
+
+
+###Part B - host range
+
+wrangle data
+```{r}
+iucn_folder <- "data/raw/iucn_range/"
+
+# list all species folders 
+species_folders <- list.dirs(iucn_folder, recursive = FALSE)
+species_folders <- species_folders[grepl("redlist_species_data_", species_folders)]
+
+
+read_iucn_species <- function(folder) {
+  # shapefile path
+  shp_file <- file.path(folder, "data_0.shp")
+  
+  # Read shapefile
+  sp <- st_read(shp_file, quiet = TRUE)
+  
+  # Extract species name from folder name
+  # Split by "_" and take the last element
+  sp_name <- tail(strsplit(basename(folder), "_")[[1]], 1)
+  
+  # Add species column
+  sp$species <- sp_name
+  return(sp)
+}
+
+species_list <- lapply(species_folders, read_iucn_species)
+species_sf <- do.call(rbind, species_list)
+
+```
+
+plot it!
+```{r}
+map_host <- ggplot() +
+  geom_sf(data = cs_america, fill = "grey90", color = alpha("grey40", 0.8), size = 0.35) +
+  geom_sf(data = species_sf, aes(fill = SCI_NAME, color = SCI_NAME), alpha = 0.5) +
+  coord_sf(xlim = c(-95, -30), ylim = c(-60, 25), expand = FALSE) +
+  theme_void(base_size = 13) +
+  labs(fill = "Species", title = "Host Range") + 
+  theme(legend.title = element_text(face = "bold"),
+        plot.margin = margin(0, 0, 0, 0)) +
+  scale_fill_paletteer_d("PNWColors::Spring") +
+  scale_color_paletteer_d("PNWColors::Spring") +
+  guides(color = FALSE)
+
+
+ggsave(map_host, file = "figures/map_host_v2.png", width = 6, height = 5.5, units = "in", dpi = 300)
+
+```
+
+
+###Part C - vector occurrence
+
+wrangle 
+```{r}
+## gbif credentials
+Sys.setenv(GBIF_USER = "sbsambado")
+Sys.setenv(GBIF_PWD = "2411ucsb")
+Sys.setenv(GBIF_EMAIL = "sbsambado@ucsb.edu")
+
+# extents
+xlim <- c(-95, -30)
+ylim <- c(-60, 25)
+
+# make bounding box
+csa_shp_wkt <- sprintf(
+  "POLYGON((%f %f, %f %f, %f %f, %f %f, %f %f))",
+  xlim[1], ylim[1],  # xmin, ymin
+  xlim[2], ylim[1],  # xmax, ymin
+  xlim[2], ylim[2],  # xmax, ymax
+  xlim[1], ylim[2],  # xmin, ymax
+  xlim[1], ylim[1])   # close polygon
+
+## call in gbif data
+culi <- name_backbone(name = "Culicoides", rank = "genus")
+culi_key <- culi$usageKey
+
+gbif_culi <- occ_download(
+  pred_and(
+    pred("geometry", csa_shp_wkt),
+    pred("hasCoordinate", TRUE),
+    pred("taxonKey", culi_key),
+    pred("occurrenceStatus", "PRESENT")),
+  format = "SIMPLE_CSV")
+
+# check download status
+occ_download_wait('0002605-251120083545085')
+
+
+# work with gbif data
+gbif_data <- occ_download_get('0002605-251120083545085') %>%
+    occ_download_import()
+
+# do some QCing
+gbif_data_slim <- gbif_data  %>% 
+  filter(occurrenceStatus == "PRESENT") %>% 
+  dplyr::select(genus, species, verbatimScientificName,
+                decimalLatitude, decimalLongitude,
+                individualCount, countryCode,stateProvince, 
+                year, month, eventDate,
+                basisOfRecord)
+
+# correct coords
+gbif_points <- st_as_sf(gbif_data_slim, coords = c("decimalLongitude", "decimalLatitude"), crs = 4326)
+
+# filter for just cuilicoides parensis
+gbif_points_cp <- gbif_points %>% 
+  filter(species == "Culicoides paraensis")
+
+```
+
+plot
+```{r}
+## set up data
+# ecologicla niche model suitability from Poongavanan et al 2025
+#https://github.com/CERI-KRISP/OROV_Vector_vs_Virus_Modelling/blob/main/Resulting%20Rasters/Americas_Consensus_Map.tif
+enm <- terra::rast("data/raw/Americas_Consensus_Map.tif")
+enm_df <- as.data.frame(enm, xy = TRUE)
+colnames(enm_df) <- c("x", "y", "consensus")
+
+library(RColorBrewer)
+## plot both vector layers
+map_vector <- 
+ggplot() +
+  geom_raster(data = enm_df, aes(x = x, y = y, fill = consensus), alpha = .8) +
+  geom_sf(data = cs_america, fill = NA, color = alpha("grey40", 0.8), size = 0.35) +
+  theme_void(base_size = 13) +
+  labs(fill = "Prob.") + 
+  theme(legend.title = element_text(face = "bold"),
+        plot.margin = margin(0, 0, 0, 0)) +
+  scale_fill_distiller(palette = "YlGnBu", direction = 1) +
+  geom_sf(data = gbif_points_cp,size = 2, alpha = .5, color ="#C23B22") +
+  labs(color = "Year", title = "Vector Suitability") +
+  coord_sf(xlim = c(-95, -30), ylim = c(-60, 25), expand = FALSE) 
+
+
+### combine them
+map_hostvector_combo <- map_host | map_vector 
+
+ggsave(map_hostvector_combo, file = "figures/map_hostvector_combo_v2.png", width = 6, height = 5.5, units = "in", dpi = 300)
+
+
+crop <- map_banana2 + labs(title = "Crops") 
+ggsave(crop, file = "figures/crop.png", width = 6, height = 5.5, units = "in", dpi = 300)
+
+```
+
+make big eco figure
+```{r}
+map_ecology_combo <- maps_crop_combo/map_hostvector_combo 
+
+```
